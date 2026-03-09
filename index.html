@@ -737,21 +737,33 @@ function subscribeFirebase(){
 }
 
 // Load initial data (called on page load)
-async function initData(){
-  showConnecting(true);
+function initData(){
   if(fbReady){
-    // Initial fetch for all 7 days
-    for(let i=0;i<DAYS_AHEAD;i++){
-      const dk=dateToKey(ksaDateOffset(i));
-      const val=await fbGet('schedule/'+dk);
-      _cache[dk]=normalizeTrains(val);
-    }
-    // Fetch archive
-    const arc=await fbGet('archive');
-    _arc=arc||[];
-    subscribeFirebase();
+    showConnecting(true);
+    let firstLoad=true;
+    fbRef('schedule').on('value', snap=>{
+      const val=snap.exists()?snap.val():{};
+      for(let i=0;i<DAYS_AHEAD;i++){
+        const dk=dateToKey(ksaDateOffset(i));
+        _cache[dk]=normalizeTrains(val[dk]||null);
+      }
+      if(firstLoad){firstLoad=false;showConnecting(false);}
+      renderMember();
+      if(isR4)renderR4Today();
+    }, err=>{
+      console.warn('Firebase error:',err);
+      showConnecting(false);
+      renderMember();
+    });
+    fbRef('archive').on('value', snap=>{
+      _arc=snap.exists()?snap.val():[];
+      if(!Array.isArray(_arc))_arc=Object.values(_arc);
+      if(isR4&&document.getElementById('panelArchive').classList.contains('active'))renderArchive();
+    });
+    // Safety: hide overlay after 5s no matter what
+    setTimeout(()=>{showConnecting(false);renderMember();},5000);
   } else {
-    // Fallback: load from localStorage
+    // Fallback: localStorage
     for(let i=0;i<DAYS_AHEAD;i++){
       const dk=dateToKey(ksaDateOffset(i));
       const lsKey=dk===dateToKey(getKSANow())?'obx_trains_v3':'obx_week_'+dk;
@@ -760,7 +772,6 @@ async function initData(){
     }
     try{const r=localStorage.getItem(ARCHIVE_KEY);_arc=r?JSON.parse(r):[];}catch(e){_arc=[];}
   }
-  showConnecting(false);
 }
 
 // ── PIN / R4 ─────────────────────────────────────────────────
@@ -1103,7 +1114,7 @@ function toast(msg,err){
 }
 
 // ── INIT ──────────────────────────────────────────────────────
-window.addEventListener('load', async ()=>{
+window.addEventListener('load', ()=>{
   const savedTZ=localStorage.getItem('obx_tz');
   const savedLang=localStorage.getItem('obx_lang');
   const savedName=localStorage.getItem('obx_myname');
@@ -1116,7 +1127,7 @@ window.addEventListener('load', async ()=>{
   }
   if(savedName)document.getElementById('memberName').value=savedName;
   applyTranslations(); buildDayNavs();
-  await initData();
+  initData();
   renderMember();
   maybeShowSetupNotice();
 });
